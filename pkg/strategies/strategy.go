@@ -66,6 +66,7 @@ func StrategyInstances(b BaseStrategy) []Strategy {
 		NewCopyTwiceNameStrategy(b),
 		NewExportStrategy(b),
 		NewImportStrategy(b),
+		NewCloneStrategy(b),
 	}
 	return s
 }
