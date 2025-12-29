@@ -11,133 +11,29 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"beryju.org/korb/v2/pkg/config"
-	"beryju.org/korb/v2/pkg/migrator"
 
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/util/homedir"
 )
 
 var (
-	kubeConfig      string
-	sourceNamespace string
-	strategy        string
-)
-
-var (
-	pvcNewStorageClass string
-	pvcNewSize         string
-	pvcNewName         string
-	pvcNewNamespace    string
-	pvcNewAccessModes  []string
-)
-
-var (
-	debug            bool
-	force            bool
-	skipWaitPVCBind  bool
-	tolerateAllNodes bool
-	timeout          string
-	copyTimeout      string
-)
-
-var (
-	rsyncLocalPath       string
-	rsyncNodeName        string
-	rsyncDryRun          bool
-	rsyncProvisionerPath string
-)
-
-var (
-	debugAttachPodName       string
-	debugAttachPodSelector   string
-	debugAttachContainerName string
-	debugAttachMode          string
-	debugAttachAllPVCs       bool
+	// Global flags (inherited by all subcommands)
+	kubeConfig string
+	namespace  string
+	debug      bool
+	timeout    string
 )
 
 var Version string
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:     "korb [pvc [pvc]]",
+	Use:   "korb",
+	Short: "Kubernetes PVC migration and backup tool",
+	Long: `Korb is a tool for migrating, backing up, and restoring
+Kubernetes Persistent Volume Claims (PVCs) with support for
+multiple storage classes and backup formats.`,
 	Version: Version,
-	Long:    `Move data between Kubernetes PVCs on different Storage Classes.`,
-	Args:    cobra.MinimumNArgs(1),
-	Run:     rootCmdRun,
-}
-
-func rootCmdRun(cmd *cobra.Command, args []string) {
-	if debug {
-		log.SetLevel(log.DebugLevel)
-	}
-
-	var t *time.Duration
-	if timeout != "" {
-		_t, err := time.ParseDuration(timeout)
-		if err != nil {
-			log.WithError(err).Panic("Failed to parse custom duration")
-			return
-		}
-		t = &_t
-	}
-
-	var cT *time.Duration
-	if copyTimeout != "" {
-		_cT, err := time.ParseDuration(copyTimeout)
-		if err != nil {
-			log.WithError(err).Panic("Failed to parse custom copy timeout")
-			return
-		}
-		cT = &_cT
-	}
-
-	for _, pvc := range args {
-		m := migrator.New(cmd.Context(), kubeConfig, strategy, tolerateAllNodes)
-		m.Force = force
-		m.WaitForTempDestPVCBind = skipWaitPVCBind
-		m.Timeout = t
-		m.CopyTimeout = cT
-
-		// Set rsync-specific configuration if rsync strategy is being used
-		if strategy == "rsync-local-path" || rsyncLocalPath != "" {
-			m.RsyncLocalPath = rsyncLocalPath
-			m.RsyncNodeName = rsyncNodeName
-			m.RsyncDryRun = rsyncDryRun
-			m.RsyncProvisionerPath = rsyncProvisionerPath
-		}
-
-		// Set debug-attach configuration if debug-attach strategy is being used
-		if strategy == "debug-attach" || debugAttachPodName != "" || debugAttachPodSelector != "" {
-			m.DebugAttachPodName = debugAttachPodName
-			m.DebugAttachPodSelector = debugAttachPodSelector
-			m.DebugAttachContainerName = debugAttachContainerName
-			m.DebugAttachMode = debugAttachMode
-			m.DebugAttachAllPVCs = debugAttachAllPVCs
-		}
-
-		// We can only support operating in a single namespace currently
-		// Since cross-namespace PVC mounts are not a thing
-		// we'd have to transfer the data over the network, which uh
-		// I don't really feel like implementing it
-		if sourceNamespace != "" {
-			m.SourceNamespace = sourceNamespace
-			m.DestNamespace = sourceNamespace
-		}
-		// if pvcNewNamespace != "" {
-		// 	m.DestNamespace = pvcNewNamespace
-		// }
-
-		m.DestPVCSize = pvcNewSize
-		m.DestPVCStorageClass = pvcNewStorageClass
-		m.DestPVCName = pvcNewName
-		m.DestPVCAccessModes = pvcNewAccessModes
-
-		m.SourcePVCName = pvc
-		m.Run()
-		if len(args) > 1 {
-			fmt.Println("=====================")
-		}
-	}
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -155,40 +51,31 @@ func Execute() {
 func init() {
 	log.SetLevel(log.InfoLevel)
 
+	// PersistentFlags are inherited by all subcommands
 	if home := homedir.HomeDir(); home != "" {
-		rootCmd.Flags().StringVar(&kubeConfig, "kube-config", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
+		rootCmd.PersistentFlags().StringVar(&kubeConfig, "kube-config", filepath.Join(home, ".kube", "config"), "Kubernetes config file")
 	} else {
-		rootCmd.Flags().StringVar(&kubeConfig, "kube-config", "", "absolute path to the kubeconfig file")
+		rootCmd.PersistentFlags().StringVar(&kubeConfig, "kube-config", "", "Kubernetes config file")
 	}
-	rootCmd.Flags().BoolVar(&debug, "debug", false, "enable debug logging")
-	rootCmd.Flags().StringVar(&sourceNamespace, "source-namespace", "", "Namespace where the old PVCs reside. If empty, the namespace from your kubeconfig file will be used.")
+	rootCmd.PersistentFlags().StringVarP(&namespace, "namespace", "n", "default", "Kubernetes namespace")
+	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug logging")
+	rootCmd.PersistentFlags().StringVar(&timeout, "timeout", "", "Operation timeout (e.g., 5m, 1h)")
+	rootCmd.PersistentFlags().StringVar(&config.ContainerImage, "container-image", config.ContainerImage, "Image to use for mover jobs")
 
-	rootCmd.Flags().StringVar(&pvcNewStorageClass, "new-pvc-storage-class", "", "Storage class to use for the new PVC. If empty, the storage class of the source will be used.")
-	rootCmd.Flags().StringVar(&pvcNewName, "new-pvc-name", "", "Name for the new PVC. If empty, same name will be reused.")
-	rootCmd.Flags().StringVar(&pvcNewSize, "new-pvc-size", "", "Size for the new PVC. If empty, the size of the source will be used. Accepts formats like used in Kubernetes Manifests (Gi, Ti, ...)")
-	rootCmd.Flags().StringVar(&pvcNewNamespace, "new-pvc-namespace", "", "Namespace for the new PVCs to be created in. If empty, the namespace from your kubeconfig file will be used.")
-	rootCmd.Flags().StringSliceVar(&pvcNewAccessModes, "new-pvc-access-mode", []string{}, "Access mode(s) for the new PVC. If empty, the access mode of the source will be used. Accepts formats like used in Kubernetes Manifests (ReadWriteOnce, ReadWriteMany, ...)")
+	// Add subcommands
+	rootCmd.AddCommand(cloneCmd)
+	rootCmd.AddCommand(exportCmd)
+	rootCmd.AddCommand(importCmd)
+	rootCmd.AddCommand(createCmd)
+}
 
-	rootCmd.Flags().BoolVar(&force, "force", false, "Ignore warning which would normally halt the tool during validation.")
-	rootCmd.Flags().BoolVar(&skipWaitPVCBind, "skip-pvc-bind-wait", false, "Skip waiting for PVC to be bound.")
-	rootCmd.Flags().BoolVar(&tolerateAllNodes, "tolerate-any-node", false, "Allow job to tolerating any node node taints.")
-
-	rootCmd.Flags().StringVar(&config.ContainerImage, "container-image", config.ContainerImage, "Image to use for moving jobs")
-	rootCmd.Flags().StringVar(&strategy, "strategy", "", "Strategy to use, by default will try to auto-select")
-	rootCmd.Flags().StringVar(&timeout, "timeout", "", "Overwrite auto-generated timeout (by default 60s for Pod to start, copy timeout is based on PVC size)")
-	rootCmd.Flags().StringVar(&copyTimeout, "copyTimeout", "", "Overwrite auto-generated copy timeout (by default 60s/GB of volume data)")
-
-	// Rsync-specific flags
-	rootCmd.Flags().StringVar(&rsyncLocalPath, "rsync-local-path", "", "Local directory path to copy from (required for rsync-local-path strategy)")
-	rootCmd.Flags().StringVar(&rsyncNodeName, "rsync-node-name", "", "Target node name for rsync operation (auto-detected if not specified)")
-	rootCmd.Flags().BoolVar(&rsyncDryRun, "rsync-dry-run", false, "Show what would be copied without executing")
-	rootCmd.Flags().StringVar(&rsyncProvisionerPath, "rsync-provisioner-path", "/opt/local-path-provisioner", "Base path for local-path provisioner")
-
-	// Debug-attach strategy flags
-	rootCmd.Flags().StringVar(&debugAttachPodName, "debug-attach-pod", "", "Target pod name for debug-attach strategy")
-	rootCmd.Flags().StringVar(&debugAttachPodSelector, "debug-attach-selector", "", "Label selector to find target pod for debug-attach strategy")
-	rootCmd.Flags().StringVar(&debugAttachContainerName, "debug-attach-container", "", "Target container name in pod (defaults to first container)")
-	rootCmd.Flags().StringVar(&debugAttachMode, "debug-attach-mode", "auto", "Mode: auto (detect), export, clone, import")
-	rootCmd.Flags().BoolVar(&debugAttachAllPVCs, "debug-attach-all-pvcs", false, "Process all PVCs mounted in the pod (multi-PVC mode)")
-
+func parseTimeout() *time.Duration {
+	if timeout == "" {
+		return nil
+	}
+	t, err := time.ParseDuration(timeout)
+	if err != nil {
+		log.WithError(err).Panic("Failed to parse timeout")
+	}
+	return &t
 }
