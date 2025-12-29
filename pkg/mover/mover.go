@@ -46,6 +46,7 @@ type MoverJob struct {
 	log              *log.Entry
 	tolerateAllNodes bool
 	ctx              context.Context
+	nodeSelector     map[string]string
 }
 
 func NewMoverJob(ctx context.Context, client *kubernetes.Clientset, mode MoverType, tolerateAllNodes bool) *MoverJob {
@@ -55,6 +56,7 @@ func NewMoverJob(ctx context.Context, client *kubernetes.Clientset, mode MoverTy
 		tolerateAllNodes: tolerateAllNodes,
 		mode:             mode,
 		ctx:              ctx,
+		nodeSelector:     make(map[string]string),
 	}
 }
 
@@ -132,11 +134,20 @@ func (m *MoverJob) Start() *MoverJob {
 		}
 	}
 
+	if len(m.nodeSelector) > 0 {
+		job.Spec.Template.Spec.NodeSelector = m.nodeSelector
+	}
+
 	j, err := m.kClient.BatchV1().Jobs(m.Namespace).Create(m.ctx, job, metav1.CreateOptions{})
 	if err != nil {
 		panic(err)
 	}
 	m.kJob = j
+	return m
+}
+
+func (m *MoverJob) WithNodeSelector(nodeName string) *MoverJob {
+	m.nodeSelector["kubernetes.io/hostname"] = nodeName
 	return m
 }
 

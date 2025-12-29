@@ -1,0 +1,33 @@
+# Test PVC and Pod for WaitForFirstConsumer clone mode
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-wffc-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 100Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-wffc-pod
+  namespace: default
+  labels:
+    app: test-wffc
+spec:
+  containers:
+  - name: alpine
+    image: alpine:latest
+    command: ["sh", "-c", "echo 'TestData for WaitForFirstConsumer test' > /data/test.txt && sleep 3600"]
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: test-wffc-pvc

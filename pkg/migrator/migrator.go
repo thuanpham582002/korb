@@ -29,6 +29,19 @@ type Migrator struct {
 	Timeout                *time.Duration
 	CopyTimeout            *time.Duration
 
+	// Rsync-specific configuration
+	RsyncLocalPath       string
+	RsyncNodeName        string
+	RsyncDryRun          bool
+	RsyncProvisionerPath string
+
+	// Debug-attach strategy configuration
+	DebugAttachPodName       string
+	DebugAttachPodSelector   string
+	DebugAttachContainerName string
+	DebugAttachMode          string
+	DebugAttachAllPVCs       bool
+
 	kConfig *rest.Config
 	kClient *kubernetes.Clientset
 
@@ -104,6 +117,59 @@ func (m *Migrator) Run() {
 		m.log.Error("No (compatible) strategy selected.")
 		return
 	}
+
+	// Configure rsync strategy if selected
+	if rsyncStrategy, ok := selected.(*strategies.RsyncLocalPathStrategy); ok {
+		if m.RsyncLocalPath != "" {
+			rsyncStrategy.SetLocalPath(m.RsyncLocalPath)
+		}
+		if m.RsyncProvisionerPath != "" {
+			rsyncStrategy.SetProvisionerBase(m.RsyncProvisionerPath)
+		}
+
+		// Re-check compatibility after configuring rsync parameters
+		ctx := strategies.MigrationContext{
+			PVCControllers: []interface{}{},
+			SourcePVC:      *sourcePVC,
+		}
+		err := selected.CompatibleWithContext(ctx)
+		if err != nil {
+			m.log.WithError(err).Error("Rsync strategy configuration failed")
+			return
+		}
+	}
+
+	// Configure debug-attach strategy if selected
+	if debugAttachStrategy, ok := selected.(*strategies.DebugAttachStrategy); ok {
+		if m.DebugAttachPodName != "" {
+			debugAttachStrategy.SetPodName(m.DebugAttachPodName)
+		}
+		if m.DebugAttachPodSelector != "" {
+			debugAttachStrategy.SetPodSelector(m.DebugAttachPodSelector)
+		}
+		if m.DebugAttachContainerName != "" {
+			debugAttachStrategy.SetContainerName(m.DebugAttachContainerName)
+		}
+		if m.DebugAttachMode != "" {
+			debugAttachStrategy.SetMode(m.DebugAttachMode)
+		}
+		if m.DebugAttachAllPVCs {
+			debugAttachStrategy.SetAllPVCs(m.DebugAttachAllPVCs)
+		}
+		debugAttachStrategy.SetNamespace(m.SourceNamespace)
+
+		// Re-check compatibility after configuring debug-attach parameters
+		ctx := strategies.MigrationContext{
+			PVCControllers: []interface{}{},
+			SourcePVC:      *sourcePVC,
+		}
+		err := selected.CompatibleWithContext(ctx)
+		if err != nil {
+			m.log.WithError(err).Error("Debug-attach strategy configuration failed")
+			return
+		}
+	}
+
 	err := selected.Do(sourcePVC, destTemplate, m.WaitForTempDestPVCBind)
 	if err != nil {
 		m.log.WithError(err).Warning("Failed to migrate")

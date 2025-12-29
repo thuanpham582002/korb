@@ -67,6 +67,8 @@ func StrategyInstances(b BaseStrategy) []Strategy {
 		NewExportStrategy(b),
 		NewImportStrategy(b),
 		NewCloneStrategy(b),
+		NewRsyncLocalPathStrategy(b),
+		NewDebugAttachStrategy(b),
 	}
 	return s
 }

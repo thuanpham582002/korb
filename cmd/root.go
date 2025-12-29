@@ -40,6 +40,21 @@ var (
 	copyTimeout      string
 )
 
+var (
+	rsyncLocalPath       string
+	rsyncNodeName        string
+	rsyncDryRun          bool
+	rsyncProvisionerPath string
+)
+
+var (
+	debugAttachPodName       string
+	debugAttachPodSelector   string
+	debugAttachContainerName string
+	debugAttachMode          string
+	debugAttachAllPVCs       bool
+)
+
 var Version string
 
 // rootCmd represents the base command when called without any subcommands
@@ -82,6 +97,23 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		m.WaitForTempDestPVCBind = skipWaitPVCBind
 		m.Timeout = t
 		m.CopyTimeout = cT
+
+		// Set rsync-specific configuration if rsync strategy is being used
+		if strategy == "rsync-local-path" || rsyncLocalPath != "" {
+			m.RsyncLocalPath = rsyncLocalPath
+			m.RsyncNodeName = rsyncNodeName
+			m.RsyncDryRun = rsyncDryRun
+			m.RsyncProvisionerPath = rsyncProvisionerPath
+		}
+
+		// Set debug-attach configuration if debug-attach strategy is being used
+		if strategy == "debug-attach" || debugAttachPodName != "" || debugAttachPodSelector != "" {
+			m.DebugAttachPodName = debugAttachPodName
+			m.DebugAttachPodSelector = debugAttachPodSelector
+			m.DebugAttachContainerName = debugAttachContainerName
+			m.DebugAttachMode = debugAttachMode
+			m.DebugAttachAllPVCs = debugAttachAllPVCs
+		}
 
 		// We can only support operating in a single namespace currently
 		// Since cross-namespace PVC mounts are not a thing
@@ -145,5 +177,18 @@ func init() {
 	rootCmd.Flags().StringVar(&strategy, "strategy", "", "Strategy to use, by default will try to auto-select")
 	rootCmd.Flags().StringVar(&timeout, "timeout", "", "Overwrite auto-generated timeout (by default 60s for Pod to start, copy timeout is based on PVC size)")
 	rootCmd.Flags().StringVar(&copyTimeout, "copyTimeout", "", "Overwrite auto-generated copy timeout (by default 60s/GB of volume data)")
+
+	// Rsync-specific flags
+	rootCmd.Flags().StringVar(&rsyncLocalPath, "rsync-local-path", "", "Local directory path to copy from (required for rsync-local-path strategy)")
+	rootCmd.Flags().StringVar(&rsyncNodeName, "rsync-node-name", "", "Target node name for rsync operation (auto-detected if not specified)")
+	rootCmd.Flags().BoolVar(&rsyncDryRun, "rsync-dry-run", false, "Show what would be copied without executing")
+	rootCmd.Flags().StringVar(&rsyncProvisionerPath, "rsync-provisioner-path", "/opt/local-path-provisioner", "Base path for local-path provisioner")
+
+	// Debug-attach strategy flags
+	rootCmd.Flags().StringVar(&debugAttachPodName, "debug-attach-pod", "", "Target pod name for debug-attach strategy")
+	rootCmd.Flags().StringVar(&debugAttachPodSelector, "debug-attach-selector", "", "Label selector to find target pod for debug-attach strategy")
+	rootCmd.Flags().StringVar(&debugAttachContainerName, "debug-attach-container", "", "Target container name in pod (defaults to first container)")
+	rootCmd.Flags().StringVar(&debugAttachMode, "debug-attach-mode", "auto", "Mode: auto (detect), export, clone, import")
+	rootCmd.Flags().BoolVar(&debugAttachAllPVCs, "debug-attach-all-pvcs", false, "Process all PVCs mounted in the pod (multi-PVC mode)")
 
 }
